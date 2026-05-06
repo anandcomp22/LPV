@@ -1,75 +1,92 @@
+!pip install yfinance
 import numpy as np
 import pandas as pd
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, LSTM
-from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
+import yfinance as yf
 
-# Load dataset (CSV file needed)
-data = pd.read_csv('Google_Stock_Price_Train.csv')
-training_set = data.iloc[:, 1:2].values
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, LSTM, Dropout
+from sklearn.preprocessing import MinMaxScaler
 
-# Scale
-scaler = MinMaxScaler()
-training_set_scaled = scaler.fit_transform(training_set)
+data = yf.download("GOOGL", start="2012-01-01", end="2020-01-01")
 
-# Create sequences
+dataset = data[['Open']].values
+
+scaler = MinMaxScaler(feature_range=(0, 1))
+dataset_scaled = scaler.fit_transform(dataset)
+
+train_size = int(len(dataset_scaled) * 0.8)
+
+train_data = dataset_scaled[:train_size]
+test_data = dataset_scaled[train_size - 60:]
+
 X_train = []
 y_train = []
 
-for i in range(60, len(training_set_scaled)):
-    X_train.append(training_set_scaled[i-60:i, 0])
-    y_train.append(training_set_scaled[i, 0])
+for i in range(60, len(train_data)):
+    X_train.append(train_data[i-60:i, 0])
+    y_train.append(train_data[i, 0])
 
-X_train, y_train = np.array(X_train), np.array(y_train)
+X_train = np.array(X_train)
+y_train = np.array(y_train)
 
-# Reshape
-X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+# Reshape for LSTM
+X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
 
-# Model
 model = Sequential()
-model.add(LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], 1)))
+
+model.add(LSTM(50, return_sequences=True,
+               input_shape=(X_train.shape[1], 1)))
+model.add(Dropout(0.2))
+
+model.add(LSTM(50, return_sequences=True))
+model.add(Dropout(0.2))
+
 model.add(LSTM(50))
+model.add(Dropout(0.2))
+
 model.add(Dense(1))
 
-# Compile
-model.compile(optimizer='adam', loss='mean_squared_error')
+# Compile Model
+model.compile(optimizer='adam',
+              loss='mean_squared_error')
 
-# Train
-model.fit(X_train, y_train, epochs=10, batch_size=32)
-
-# Load test data
-dataset_test = pd.read_csv('Google_Stock_Price_Test.csv')
-real_stock_price = dataset_test.iloc[:, 1:2].values
-
-# Combine train + test
-dataset_total = pd.concat((data['Open'], dataset_test['Open']), axis=0)
-
-# Prepare inputs
-inputs = dataset_total[len(dataset_total) - len(dataset_test) - 60:].values
-inputs = inputs.reshape(-1,1)
-inputs = scaler.transform(inputs)
+model.fit(X_train,
+          y_train,
+          epochs=5,
+          batch_size=32)
 
 X_test = []
-for i in range(60, len(inputs)):
-    X_test.append(inputs[i-60:i, 0])
+y_test = []
+
+for i in range(60, len(test_data)):
+    X_test.append(test_data[i-60:i, 0])
+    y_test.append(test_data[i, 0])
 
 X_test = np.array(X_test)
+y_test = np.array(y_test)
 
-# Reshape
-X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
 
-# Predict
-predicted_stock_price = model.predict(X_test)
-predicted_stock_price = scaler.inverse_transform(predicted_stock_price)
+predicted_prices = model.predict(X_test)
 
-# Plot
-plt.plot(real_stock_price, color='red', label='Actual Price')
-plt.plot(predicted_stock_price, color='blue', label='Predicted Price')
-plt.title('Stock Price Prediction')
+predicted_prices = scaler.inverse_transform(predicted_prices)
+
+real_prices = scaler.inverse_transform(
+    y_test.reshape(-1, 1)
+)
+
+plt.figure(figsize=(12, 6))
+
+plt.plot(real_prices, color='blue',
+         label='Real Google Stock Price')
+
+plt.plot(predicted_prices, color='red',
+         label='Predicted Google Stock Price')
+
+plt.title('Google Stock Price Prediction')
 plt.xlabel('Time')
 plt.ylabel('Stock Price')
 plt.legend()
-plt.show()
 
-print("Model Trained Successfully")
+plt.show()
